@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Device Simulator</title>
+<style>
+  :root {
+    --bezel: #1a1a1a;
+    --screen-bg: #06110a;
+    --screen-text: #7CFFB2;
+    --screen-dim: #2f6b47;
+    --accent: #7CFFB2;
+    --paper: #f4f2ec;
+    --ink: #1c1f1c;
+    --line: #d8d4c8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, "SF Pro Text", system-ui, sans-serif;
+    padding: 20px 16px 60px;
+    max-width: 480px;
+    margin-inline: auto;
+  }
+  h1 {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 4px 0 2px;
+  }
+  .sub {
+    color: #6b675c;
+    font-size: 13px;
+    margin-bottom: 20px;
+    line-height: 1.4;
+  }
+
+  /* --- simulated device screen --- */
+  .device {
+    background: var(--bezel);
+    border-radius: 22px;
+    padding: 14px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+    margin-bottom: 22px;
+  }
+  .device-label {
+    text-align: center;
+    color: #8a8a8a;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .screen {
+    background: var(--screen-bg);
+    border-radius: 8px;
+    aspect-ratio: 320 / 240;
+    padding: 14px 16px;
+    font-family: "SF Mono", Menlo, monospace;
+    color: var(--screen-text);
+    font-size: 15px;
+    line-height: 1.45;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+  }
+  .screen-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    color: var(--screen-dim);
+    margin-bottom: 8px;
+    border-bottom: 1px solid #123522;
+    padding-bottom: 6px;
+  }
+  .screen-body {
+    white-space: pre-wrap;
+    flex: 1;
+  }
+  .screen-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--screen-dim);
+    margin-top: 8px;
+  }
+  .page-nav button {
+    background: none;
+    border: 1px solid var(--screen-dim);
+    color: var(--screen-text);
+    border-radius: 5px;
+    font-size: 11px;
+    padding: 3px 8px;
+    font-family: inherit;
+  }
+  .page-nav button:disabled { opacity: 0.3; }
+  .cursor-blink {
+    display: inline-block;
+    width: 8px;
+    height: 14px;
+    background: var(--screen-text);
+    animation: blink 1s step-start infinite;
+    vertical-align: middle;
+    margin-left: 2px;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* --- controls --- */
+  .field {
+    margin-bottom: 16px;
+  }
+  label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #6b675c;
+    margin-bottom: 6px;
+  }
+  input[type="password"], input[type="text"] {
+    width: 100%;
+    padding: 11px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 15px;
+    background: white;
+  }
+  .row {
+    display: flex;
+    gap: 10px;
+  }
+  .row > * { flex: 1; }
+  button.action {
+    width: 100%;
+    padding: 13px;
+    border: none;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn-primary { background: var(--ink); color: white; }
+  .btn-secondary { background: #eae7dd; color: var(--ink); }
+  .btn-danger { background: #c9463a; color: white; }
+  .btn-ready { background: var(--accent); color: var(--ink); }
+  button:disabled { opacity: 0.4; cursor: default; }
+
+  .capture-preview {
+    margin-top: 10px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+  }
+  .capture-preview img { display: block; width: 100%; }
+  .status-chip {
+    display: inline-block;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    margin-top: 8px;
+  }
+  .chip-ok { background: #e3f3e7; color: #1e6b3a; }
+  .chip-wait { background: #fbeee0; color: #92510c; }
+
+  input[type="file"] { display: none; }
+
+  .note {
+    font-size: 12px;
+    color: #8a8578;
+    line-height: 1.5;
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+  }
+</style>
+</head>
+<body>
+
+  <h1>Assistant Simulator</h1>
+  <div class="sub">Runs entirely in Safari on your iPhone — uses your camera and lets you type your question, to test the same Gemini vision pipeline the real device will run, before any hardware exists.</div>
+
+  <div class="device">
+    <div class="device-label">Simulated 3&Prime; Screen</div>
+    <div class="screen">
+      <div class="screen-header">
+        <span id="screenState">Ready</span>
+        <span id="screenPageCount"></span>
+      </div>
+      <div class="screen-body" id="screenBody">Take a photo and type a question below, then tap Ask.<span class="cursor-blink"></span></div>
+      <div class="screen-footer">
+        <span id="screenSub"></span>
+        <div class="page-nav" id="pageNav" style="display:none;">
+          <button id="prevPage">&lsaquo; prev</button>
+          <button id="nextPage">next &rsaquo;</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="field">
+    <label for="apiKey">Gemini API Key</label>
+    <input type="password" id="apiKey" placeholder="Paste your key — not saved anywhere">
+  </div>
+
+  <div class="field">
+    <label>1. Photo</label>
+    <button class="action btn-secondary" id="photoBtn">Take Photo</button>
+    <input type="file" id="photoInput" accept="image/*" capture="environment">
+    <div id="photoStatus"></div>
+    <div class="capture-preview" id="photoPreviewWrap" style="display:none;">
+      <img id="photoPreview">
+    </div>
+  </div>
+
+  <div class="field">
+    <label>2. Your question</label>
+    <input type="text" id="questionInput" placeholder="e.g. what am I looking at?">
+    <div style="font-size:12px;color:#8a8578;margin-top:6px;">Tip: tap the mic icon on your keyboard to speak this instead of typing.</div>
+  </div>
+
+  <button class="action btn-ready" id="askBtn" disabled>Ask</button>
+
+  <div class="note">
+    Your API key is only kept in this page's memory for the current session — it's never saved to your phone or sent anywhere except Google's API. Get a free key at aistudio.google.com/app/apikey. This page tests the same image-understanding request the real firmware sends — the real device transcribes your spoken question on-device via Gemini too, but typing it here removes audio recording as a variable while you're validating the API key, prompt, and vision pipeline.
+  </div>
+
+<script>
+  let photoBase64 = null, photoMime = null;
+  let pages = [];
+  let currentPage = 0;
+
+  const screenState = document.getElementById('screenState');
+  const screenBody = document.getElementById('screenBody');
+  const screenSub = document.getElementById('screenSub');
+  const screenPageCount = document.getElementById('screenPageCount');
+  const pageNav = document.getElementById('pageNav');
+  const askBtn = document.getElementById('askBtn');
+
+  function setScreen(state, body, sub) {
+    screenState.textContent = state;
+    screenBody.textContent = body;
+    screenSub.textContent = sub || '';
+  }
+
+  function checkReady() {
+    askBtn.disabled = !(photoBase64 && document.getElementById('questionInput').value.trim() && document.getElementById('apiKey').value.trim());
+  }
+
+  document.getElementById('apiKey').addEventListener('input', checkReady);
+  document.getElementById('questionInput').addEventListener('input', checkReady);
+
+  // --- Photo capture ---
+  document.getElementById('photoBtn').addEventListener('click', () => {
+    document.getElementById('photoInput').click();
+  });
+  document.getElementById('photoInput').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // iPhone photos are several MB — far bigger than the ESP32's
+    // camera would ever produce (max VGA, 640x480), and large enough
+    // to risk the request timing out or getting truncated on mobile
+    // networks. Resize down to something realistic before sending.
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = () => {
+      img.onload = () => {
+        const maxDim = 640;
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        photoBase64 = dataUrl.split(',')[1];
+        photoMime = 'image/jpeg';
+
+        document.getElementById('photoPreview').src = dataUrl;
+        document.getElementById('photoPreviewWrap').style.display = 'block';
+        document.getElementById('photoStatus').innerHTML =
+          '<span class="status-chip chip-ok">Photo captured (resized to ' +
+          canvas.width + '&times;' + canvas.height + ')</span>';
+        checkReady();
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  // --- Word wrap + pagination, mirroring the firmware's display logic ---
+  function wrapText(text, maxChars) {
+    const lines = [];
+    let pos = 0;
+    while (pos < text.length) {
+      let end = Math.min(pos + maxChars, text.length);
+      if (end < text.length && text[end] !== ' ') {
+        const lastSpace = text.lastIndexOf(' ', end);
+        if (lastSpace > pos) end = lastSpace;
+      }
+      lines.push(text.slice(pos, end).trim());
+      pos = end;
+      while (text[pos] === ' ') pos++;
+    }
+    return lines;
+  }
+
+  function paginate(lines, perPage) {
+    const result = [];
+    for (let i = 0; i < lines.length; i += perPage) {
+      result.push(lines.slice(i, i + perPage).join('\n'));
+    }
+    return result.length ? result : [''];
+  }
+
+  function showPage(i) {
+    currentPage = i;
+    screenBody.textContent = pages[i];
+    screenPageCount.textContent = pages.length > 1 ? (i + 1) + '/' + pages.length : '';
+    pageNav.style.display = pages.length > 1 ? 'flex' : 'none';
+    document.getElementById('prevPage').disabled = i === 0;
+    document.getElementById('nextPage').disabled = i === pages.length - 1;
+  }
+
+  document.getElementById('prevPage').addEventListener('click', () => {
+    if (currentPage > 0) showPage(currentPage - 1);
+  });
+  document.getElementById('nextPage').addEventListener('click', () => {
+    if (currentPage < pages.length - 1) showPage(currentPage + 1);
+  });
+
+  // --- Ask Gemini (image + typed question — no audio, simpler and more reliable) ---
+  askBtn.addEventListener('click', async () => {
+    const apiKey = document.getElementById('apiKey').value.trim();
+    const question = document.getElementById('questionInput').value.trim();
+    askBtn.disabled = true;
+    pageNav.style.display = 'none';
+    setScreen('Thinking...', 'Contacting Gemini…', '');
+
+    const payload = {
+      contents: [{
+        parts: [
+          {
+            text: "You are a helpful voice assistant with a camera. Look at the attached image if relevant, and answer this question conversationally in under 40 words since it will be shown on a small display: " + question
+          },
+          { inline_data: { mime_type: photoMime, data: photoBase64 } }
+        ]
+      }],
+      generationConfig: {
+        maxOutputTokens: 200
+      }
+    };
+
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }
+      );
+
+      if (!res.ok) {
+        const errText = await res.text();
+        setScreen('Error', 'HTTP ' + res.status + '\n' + errText.slice(0, 200), '');
+        askBtn.disabled = false;
+        return;
+      }
+
+      let data;
+      const rawText = await res.text();
+      try {
+        data = JSON.parse(rawText);
+      } catch (parseErr) {
+        setScreen(
+          'Error',
+          'Response looked cut off (' + rawText.length + ' chars received). ' +
+          'Try again on WiFi.',
+          ''
+        );
+        console.log('Raw response that failed to parse:', rawText);
+        askBtn.disabled = false;
+        return;
+      }
+
+      const reply = data.candidates[0].content.parts[0].text.trim();
+
+      const lines = wrapText(reply, 26);
+      pages = paginate(lines, 9);
+      showPage(0);
+      screenState.textContent = 'Reply:';
+      screenSub.textContent = 'Asked: "' + question + '"';
+
+    } catch (err) {
+      setScreen('Error', err.message, '');
+    }
+    askBtn.disabled = false;
+  });
+</script>
+</body>
+</html>
