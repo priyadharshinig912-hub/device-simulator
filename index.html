@@ -170,6 +170,18 @@
   .chip-wait { background: #fbeee0; color: #92510c; }
 
   input[type="file"] { display: none; }
+  .meeting-panel {
+    margin: 22px 0; padding: 14px; background: white; border: 1px solid var(--line); border-radius: 12px;
+  }
+  .meeting-actions { display:flex; gap:10px; }
+  .meeting-actions button { flex:1; }
+  .live-status { font-size:12px; color:#6b675c; margin:10px 0 8px; min-height:18px; }
+  .live-status.listening { color:#1e6b3a; font-weight:600; }
+  .transcript-box, .notes-box { white-space:pre-wrap; background:#f8f7f3; border:1px solid var(--line); border-radius:8px; padding:12px; font-size:13px; line-height:1.5; max-height:240px; overflow:auto; }
+  .transcript-box:empty::before { content:'Live transcript will appear here...'; color:#9a9589; }
+  .notes-box:empty::before { content:'Meeting notes will appear here after you end the meeting.'; color:#9a9589; }
+  .meeting-timer { float:right; font-family:monospace; }
+
 
   .note {
     font-size: 12px;
@@ -184,7 +196,7 @@
 <body>
 
   <h1>Assistant Simulator</h1>
-  <div class="sub">Runs entirely in Safari on your iPhone — uses your camera and lets you type your question, to test the same Gemini vision pipeline the real device will run, before any hardware exists.</div>
+  <div class="sub">Runs entirely in Safari on your iPhone — uses your camera and mic to test the same Gemini pipeline the real device will run, before any hardware exists.</div>
 
   <div class="device">
     <div class="device-label">Simulated 3&Prime; Screen</div>
@@ -193,7 +205,7 @@
         <span id="screenState">Ready</span>
         <span id="screenPageCount"></span>
       </div>
-      <div class="screen-body" id="screenBody">Take a photo and type a question below, then tap Ask.<span class="cursor-blink"></span></div>
+      <div class="screen-body" id="screenBody">Take a photo and record a question below, then tap Ask.<span class="cursor-blink"></span></div>
       <div class="screen-footer">
         <span id="screenSub"></span>
         <div class="page-nav" id="pageNav" style="display:none;">
@@ -220,19 +232,33 @@
   </div>
 
   <div class="field">
-    <label>2. Your question</label>
-    <input type="text" id="questionInput" placeholder="e.g. what am I looking at?">
-    <div style="font-size:12px;color:#8a8578;margin-top:6px;">Tip: tap the mic icon on your keyboard to speak this instead of typing.</div>
+    <label>2. Question (spoken)</label>
+    <button class="action btn-secondary" id="recordBtn">Record Question</button>
+    <input type="file" id="audioInput" accept="audio/*" capture>
+    <div id="audioStatus"></div>
   </div>
 
   <button class="action btn-ready" id="askBtn" disabled>Ask</button>
+  <div class="meeting-panel">
+    <label>3. Meeting Assistant</label>
+    <div class="meeting-actions">
+      <button class="action btn-primary" id="startMeetingBtn">🎙 Start Live Transcript</button>
+      <button class="action btn-danger" id="endMeetingBtn" disabled>⏹ End & Generate Notes</button>
+    </div>
+    <div class="live-status" id="transcriptStatus">Ready to transcribe.</div>
+    <div class="transcript-box" id="transcriptBox"></div>
+    <div style="font-size:12px;color:#6b675c;margin:14px 0 6px;font-weight:600;">MEETING NOTES</div>
+    <div class="notes-box" id="notesBox"></div>
+  </div>
+
 
   <div class="note">
-    Your API key is only kept in this page's memory for the current session — it's never saved to your phone or sent anywhere except Google's API. Get a free key at aistudio.google.com/app/apikey. This page tests the same image-understanding request the real firmware sends — the real device transcribes your spoken question on-device via Gemini too, but typing it here removes audio recording as a variable while you're validating the API key, prompt, and vision pipeline.
+    Your API key is only kept in this page's memory for the current session — it's never saved to your phone or sent anywhere except Google's API. Get a free key at aistudio.google.com/app/apikey. This page sends the same prompt and structured-JSON request the real firmware sends, so a working test here means your API key and prompt logic are correct before hardware ever gets built.
   </div>
 
 <script>
   let photoBase64 = null, photoMime = null;
+  let audioBase64 = null, audioMime = null;
   let pages = [];
   let currentPage = 0;
 
@@ -250,11 +276,10 @@
   }
 
   function checkReady() {
-    askBtn.disabled = !(photoBase64 && document.getElementById('questionInput').value.trim() && document.getElementById('apiKey').value.trim());
+    askBtn.disabled = !(photoBase64 && audioBase64 && document.getElementById('apiKey').value.trim());
   }
 
   document.getElementById('apiKey').addEventListener('input', checkReady);
-  document.getElementById('questionInput').addEventListener('input', checkReady);
 
   // --- Photo capture ---
   document.getElementById('photoBtn').addEventListener('click', () => {
@@ -263,35 +288,33 @@
   document.getElementById('photoInput').addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
-    // iPhone photos are several MB — far bigger than the ESP32's
-    // camera would ever produce (max VGA, 640x480), and large enough
-    // to risk the request timing out or getting truncated on mobile
-    // networks. Resize down to something realistic before sending.
-    const img = new Image();
+    photoMime = file.type || 'image/jpeg';
     const reader = new FileReader();
     reader.onload = () => {
-      img.onload = () => {
-        const maxDim = 640;
-        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.round(img.width * scale);
-        canvas.height = Math.round(img.height * scale);
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      photoBase64 = reader.result.split(',')[1];
+      document.getElementById('photoPreview').src = reader.result;
+      document.getElementById('photoPreviewWrap').style.display = 'block';
+      document.getElementById('photoStatus').innerHTML = '<span class="status-chip chip-ok">Photo captured</span>';
+      checkReady();
+    };
+    reader.readAsDataURL(file);
+  });
 
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        photoBase64 = dataUrl.split(',')[1];
-        photoMime = 'image/jpeg';
-
-        document.getElementById('photoPreview').src = dataUrl;
-        document.getElementById('photoPreviewWrap').style.display = 'block';
-        document.getElementById('photoStatus').innerHTML =
-          '<span class="status-chip chip-ok">Photo captured (resized to ' +
-          canvas.width + '&times;' + canvas.height + ')</span>';
-        checkReady();
-      };
-      img.src = reader.result;
+  // --- Audio recording (native file picker — works without HTTPS/secure context) ---
+  document.getElementById('recordBtn').addEventListener('click', () => {
+    document.getElementById('audioInput').click();
+  });
+  document.getElementById('audioInput').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    audioMime = file.type || 'audio/mp4';
+    const reader = new FileReader();
+    reader.onload = () => {
+      audioBase64 = reader.result.split(',')[1];
+      document.getElementById('audioStatus').innerHTML =
+        '<span class="status-chip chip-ok">Question recorded</span>';
+      document.getElementById('recordBtn').textContent = 'Re-record';
+      checkReady();
     };
     reader.readAsDataURL(file);
   });
@@ -337,10 +360,9 @@
     if (currentPage < pages.length - 1) showPage(currentPage + 1);
   });
 
-  // --- Ask Gemini (image + typed question — no audio, simpler and more reliable) ---
+  // --- Ask Gemini (mirrors the firmware's exact request shape) ---
   askBtn.addEventListener('click', async () => {
     const apiKey = document.getElementById('apiKey').value.trim();
-    const question = document.getElementById('questionInput').value.trim();
     askBtn.disabled = true;
     pageNav.style.display = 'none';
     setScreen('Thinking...', 'Contacting Gemini…', '');
@@ -349,19 +371,29 @@
       contents: [{
         parts: [
           {
-            text: "You are a helpful voice assistant with a camera. Look at the attached image if relevant, and answer this question conversationally in under 40 words since it will be shown on a small display: " + question
+            text: "You are a helpful voice assistant with a camera. Listen to the attached audio and transcribe what the user said into the 'transcript' field. Look at the attached image if relevant to their question. Write your conversational answer in the 'reply' field, under 40 words since it will be shown on a small display."
           },
-          { inline_data: { mime_type: photoMime, data: photoBase64 } }
+          { inline_data: { mime_type: photoMime, data: photoBase64 } },
+          { inline_data: { mime_type: audioMime, data: audioBase64 } }
         ]
       }],
       generationConfig: {
-        maxOutputTokens: 200
+        maxOutputTokens: 200,
+        response_mime_type: "application/json",
+        response_schema: {
+          type: "OBJECT",
+          properties: {
+            transcript: { type: "STRING" },
+            reply: { type: "STRING" }
+          },
+          required: ["transcript", "reply"]
+        }
       }
     };
 
     try {
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -376,35 +408,21 @@
         return;
       }
 
-      let data;
-      const rawText = await res.text();
-      try {
-        data = JSON.parse(rawText);
-      } catch (parseErr) {
-        setScreen(
-          'Error',
-          'Response looked cut off (' + rawText.length + ' chars received). ' +
-          'Try again on WiFi.',
-          ''
-        );
-        console.log('Raw response that failed to parse:', rawText);
-        askBtn.disabled = false;
-        return;
-      }
+      const data = await res.json();
+      const innerText = data.candidates[0].content.parts[0].text;
+      const parsed = JSON.parse(innerText);
 
-      const reply = data.candidates[0].content.parts[0].text.trim();
-
-      const lines = wrapText(reply, 26);
+      const lines = wrapText(parsed.reply, 26);
       pages = paginate(lines, 9);
       showPage(0);
       screenState.textContent = 'Reply:';
-      screenSub.textContent = 'Asked: "' + question + '"';
+      screenSub.textContent = 'Heard: "' + parsed.transcript + '"';
 
     } catch (err) {
       setScreen('Error', err.message, '');
     }
     askBtn.disabled = false;
-  });
+  });\n\n  // --- Live meeting transcription + Gemini meeting notes ---\n  let recognition = null;\n  let transcriptFinal = '';\n  let transcriptInterim = '';\n  let meetingActive = false;\n  let meetingStartedAt = null;\n  let timerHandle = null;\n\n  const startMeetingBtn = document.getElementById('startMeetingBtn');\n  const endMeetingBtn = document.getElementById('endMeetingBtn');\n  const transcriptBox = document.getElementById('transcriptBox');\n  const transcriptStatus = document.getElementById('transcriptStatus');\n  const notesBox = document.getElementById('notesBox');\n\n  function updateTranscript() {\n    transcriptBox.textContent = (transcriptFinal + (transcriptInterim ? '\\n' + transcriptInterim : '')).trim();\n    transcriptBox.scrollTop = transcriptBox.scrollHeight;\n  }\n\n  function formatTimer() {\n    if (!meetingStartedAt) return '';\n    const seconds = Math.floor((Date.now() - meetingStartedAt) / 1000);\n    const mm = String(Math.floor(seconds / 60)).padStart(2, '0');\n    const ss = String(seconds % 60).padStart(2, '0');\n    return mm + ':' + ss;\n  }\n\n  function setMeetingStatus(text, listening=false) {\n    transcriptStatus.innerHTML = text + (meetingActive ? '<span class="meeting-timer">' + formatTimer() + '</span>' : '');\n    transcriptStatus.classList.toggle('listening', listening);\n  }\n\n  function createRecognition() {\n    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;\n    if (!SpeechRecognition) return null;\n    const r = new SpeechRecognition();\n    r.continuous = true;\n    r.interimResults = true;\n    r.lang = 'en-US';\n    r.onstart = () => setMeetingStatus('● Listening…', true);\n    r.onresult = (event) => {\n      let interim = '';\n      for (let i = event.resultIndex; i < event.results.length; i++) {\n        const text = event.results[i][0].transcript;\n        if (event.results[i].isFinal) transcriptFinal += text.trim() + ' ';\n        else interim += text;\n      }\n      transcriptInterim = interim;\n      updateTranscript();\n    };\n    r.onerror = (event) => {\n      transcriptStatus.textContent = 'Transcript error: ' + event.error;\n      if (meetingActive && event.error !== 'aborted') {\n        setTimeout(() => { try { r.start(); } catch(e) {} }, 500);\n      }\n    };\n    r.onend = () => {\n      if (meetingActive) {\n        try { r.start(); } catch(e) {}\n      }\n    };\n    return r;\n  }\n\n  startMeetingBtn.addEventListener('click', () => {\n    if (!recognition) recognition = createRecognition();\n    if (!recognition) {\n      setMeetingStatus('Live transcription is not supported by this browser. Please try Safari on iPhone or a supported browser.', false);\n      return;\n    }\n    transcriptFinal = '';\n    transcriptInterim = '';\n    notesBox.textContent = '';\n    updateTranscript();\n    meetingActive = true;\n    meetingStartedAt = Date.now();\n    startMeetingBtn.disabled = true;\n    endMeetingBtn.disabled = false;\n    startMeetingBtn.textContent = '🎙 Transcribing…';\n    timerHandle = setInterval(() => { if (meetingActive) setMeetingStatus('● Listening…', true); }, 1000);\n    try { recognition.start(); } catch(e) {}\n  });\n\n  endMeetingBtn.addEventListener('click', async () => {\n    meetingActive = false;\n    clearInterval(timerHandle);\n    if (recognition) { try { recognition.stop(); } catch(e) {} }\n    transcriptInterim = '';\n    updateTranscript();\n    startMeetingBtn.disabled = false;\n    endMeetingBtn.disabled = true;\n    startMeetingBtn.textContent = '🎙 Start Live Transcript';\n    setMeetingStatus('Meeting ended. Generating notes…');\n\n    const transcript = transcriptFinal.trim();\n    const apiKey = document.getElementById('apiKey').value.trim();\n    if (!transcript) {\n      notesBox.textContent = 'No transcript was captured.';\n      setMeetingStatus('Meeting ended.');\n      return;\n    }\n    if (!apiKey) {\n      notesBox.textContent = 'Please enter your Gemini API key before generating notes.';\n      setMeetingStatus('Meeting ended. API key required.');\n      return;\n    }\n\n    const prompt = `Create concise professional meeting notes from the transcript below. Use exactly these sections: Summary, Key Discussion Points, Decisions, Action Items, Next Steps. If a section has no information, write "None identified". Do not invent names, decisions, deadlines, or actions.\\n\\nTRANSCRIPT:\\n${transcript}`;\n    const payload = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 800 } };\n\n    try {\n      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`, {\n        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)\n      });\n      const raw = await res.text();\n      if (!res.ok) throw new Error('HTTP ' + res.status + ': ' + raw.slice(0, 250));\n      const data = JSON.parse(raw);\n      const notes = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();\n      notesBox.textContent = notes || 'Gemini returned no notes.';\n      setMeetingStatus('Notes ready.');\n    } catch (err) {\n      notesBox.textContent = 'Could not generate notes: ' + err.message;\n      setMeetingStatus('Meeting ended. Notes generation failed.');\n    }\n  });\n
 </script>
 </body>
 </html>
